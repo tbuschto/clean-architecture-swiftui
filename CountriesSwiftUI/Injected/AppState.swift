@@ -17,7 +17,10 @@ struct AppState: Equatable {
 }
 
 extension AppState {
-    struct UserData: Equatable {
+  struct UserData: Equatable {
+
+    var countriesSearch = CountriesSearch()
+
         /*
          The list of countries (Loadable<[Country]>) used to be stored here.
          It was removed for performing countries' search by name inside a database,

@@ -11,7 +11,7 @@ import Combine
 
 struct CountriesList: View {
     
-    @State private var countriesSearch = CountriesSearch()
+    @State private var searchText = ""
     @State private(set) var countries: Loadable<LazyList<Country>>
     @State private var routingState: Routing = .init()
     private var routingBinding: Binding<Routing> {
@@ -21,7 +21,7 @@ struct CountriesList: View {
     @Environment(\.injected) private var injected: DIContainer
     @Environment(\.locale) private var locale: Locale
     private let localeContainer = LocaleReader.Container()
-    
+  private var cancellableSet: Set<AnyCancellable> = []
     let inspection = Inspection<Self>()
     
     init(countries: Loadable<LazyList<Country>> = .notRequested) {
@@ -34,16 +34,21 @@ struct CountriesList: View {
                 self.content
                     .navigationBarItems(trailing: self.permissionsButton)
                     .navigationBarTitle("Countries")
-                    .navigationBarHidden(self.countriesSearch.keyboardHeight > 0)
+                    .navigationBarHidden(injected.appState.value.userData.countriesSearch.keyboardHeight > 0)
                     .animation(.easeOut(duration: 0.3))
             }
             .navigationViewStyle(DoubleColumnNavigationViewStyle())
         }
         .modifier(LocaleReader(container: localeContainer))
-        .onReceive(keyboardHeightUpdate) { self.countriesSearch.keyboardHeight = $0 }
+        .onReceive(keyboardHeightUpdate) { injected.appState.value.userData.countriesSearch.keyboardHeight = $0 }
         .onReceive(routingUpdate) { self.routingState = $0 }
         .onReceive(canRequestPushPermissionUpdate) { self.canRequestPushPermission = $0 }
         .onReceive(inspection.notice) { self.inspection.visit(self, $0) }
+        .onReceive(searchTextUpdates, perform: { value in
+          print(value)
+          reloadCountries()
+          return
+        })
     }
     
     @ViewBuilder private var content: some View {
@@ -103,9 +108,11 @@ private extension CountriesList {
 
 private extension CountriesList {
     func reloadCountries() {
+      let text = injected.appState.value.userData.countriesSearch.searchText
+      print("reload \(text)")
         injected.interactors.countriesInteractor
             .load(countries: $countries,
-                  search: countriesSearch.searchText,
+                  search: text,
                   locale: localeContainer.locale)
     }
     
@@ -143,11 +150,12 @@ private extension CountriesList {
     func loadedView(_ countries: LazyList<Country>, showSearch: Bool, showLoading: Bool) -> some View {
         VStack {
             if showSearch {
-                SearchBar(text: $countriesSearch.searchText
-                    .onSet { _ in
-                        self.reloadCountries()
-                    }
-                )
+              SearchBar(text: $searchText).onChange(of: searchText) {
+                print("onchange: \(searchText)")
+                // both work:
+                self.injected.appState.value.userData.countriesSearch.searchText = $0
+                // self.injected.appState[\.userData.countriesSearch.searchText] = $0
+              }
             }
             if showLoading {
                 ActivityIndicatorView().padding()
@@ -172,15 +180,15 @@ private extension CountriesList {
         if #available(iOS 14, *) {
             return 0
         } else {
-            return countriesSearch.keyboardHeight
+          return injected.appState.value.userData.countriesSearch.keyboardHeight
         }
     }
 }
 
 // MARK: - Search State
 
-extension CountriesList {
-    struct CountriesSearch {
+extension AppState.UserData {
+  struct CountriesSearch: Equatable {
         var searchText: String = ""
         var keyboardHeight: CGFloat = 0
     }
@@ -211,6 +219,13 @@ private extension CountriesList {
             .map { $0 == .notRequested || $0 == .denied }
             .eraseToAnyPublisher()
     }
+  
+  var searchTextUpdates: AnyPublisher<String, Never> {
+    injected.appState.updates(for: \.userData.countriesSearch.searchText)
+      .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
+      .eraseToAnyPublisher()
+  }
+  
 }
 
 #if DEBUG
